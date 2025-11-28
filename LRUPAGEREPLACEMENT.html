@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>LRU PAGE REPLACEMENT</title>
+<!-- html2canvas & jsPDF (export) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+:root{--bg:#ffffff;--fg:#000000;--muted:#666;--hit:#28a745;--fault:#dc3545}
+*{box-sizing:border-box}
+body{margin:0;font-family:Inter,Arial,Helvetica,sans-serif;background:var(--bg);color:var(--fg)}
+.app{max-width:1250px;margin:20px auto;padding:18px}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px}
+h1{font-size:18px;margin:0}
+.meta{font-size:13px;color:var(--muted)}
+.controls{display:grid;grid-template-columns:1fr 200px 220px;gap:12px;margin-top:14px}
+.card{border:2px solid var(--fg);background:#fff;padding:12px;border-radius:10px}
+label{display:block;font-size:13px;margin-bottom:6px}
+input[type=text],input[type=number],select{width:100%;padding:8px;border:2px solid var(--fg);border-radius:8px;background:transparent}
+.btn{padding:8px 10px;border-radius:8px;border:2px solid var(--fg);background:transparent;cursor:pointer;font-weight:700}
+.btn.primary{background:var(--fg);color:var(--bg)}
+.controls-row{display:flex;gap:8px;align-items:center}
+.small{font-size:13px;color:var(--muted)}
+
+/* Result area */
+.result-area{display:flex;gap:12px;margin-top:14px}
+.table-wrap{flex:1;border:2px solid var(--fg);border-radius:10px;overflow:auto;padding:8px;background:var(--bg)}
+.sidebar{width:320px;border:2px solid var(--fg);border-radius:10px;padding:12px;background:#fafafa}
+
+table{border-collapse:collapse;width:100%;min-width:760px}
+th,td{border:1px solid var(--fg);padding:10px;text-align:center;min-width:48px}
+thead th{position:sticky;top:0;background:var(--bg);z-index:3}
+.ref-row .ref-cell{font-weight:800}
+.cell-empty{color:var(--muted)}
+.hit{color:var(--hit);font-weight:800;animation:glow .42s}
+.fault{color:var(--fault);font-weight:800;animation:shake .42s}
+@keyframes shake{0%{transform:translateX(0)}25%{transform:translateX(-6px)}50%{transform:translateX(6px)}75%{transform:translateX(-4px)}100%{transform:translateX(0)}}
+@keyframes glow{0%{text-shadow:0 0 12px rgba(40,167,69,0.8)}100%{text-shadow:none}}
+
+/* sidebar pieces */
+#explain{border:1px dashed var(--muted);padding:10px;border-radius:8px;min-height:72px;background:#fff}
+#history{margin-top:10px;max-height:240px;overflow:auto;border:1px solid var(--fg);padding:8px;background:#fff}
+.log{padding:6px;border-bottom:1px solid #eee;font-size:13px}
+#achievements{margin-top:10px}
+.badge{display:inline-block;background:#222;color:#fff;padding:6px 8px;border-radius:8px;margin:6px 6px 0 0;font-weight:700}
+
+/* themes */
+.theme-dark{--bg:#000;--fg:#fff;background:#000;color:#fff}
+.theme-chalk{--bg:#f7f5ee;--fg:#111}
+.theme-minimal{--bg:#f4f4f4;--fg:#111}
+
+footer{margin-top:12px;font-size:13px;color:var(--muted)}
+
+@media (max-width:980px){.controls{grid-template-columns:1fr} .result-area{flex-direction:column} .sidebar{width:100%}}
+</style>
+</head>
+<body>
+<div class="app" id="appRoot">
+  <header>
+    <div>
+      <h1>LRU Page Replacement</h1>
+      <div class="meta">• Green = hit • Red = fault • Features: explanations, themes, keyboard, history, achievements</div>
+    </div>
+    <div class="meta">GROUP 5</div>
+  </header>
+
+  <div class="controls">
+    <div class="card">
+      <label>Page reference string (space or comma separated)</label>
+      <input id="pages" type="text" value="7 0 1 2 0 3 0 4" />
+      <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+        <div style="flex:1">
+          <label>Number of frames</label>
+          <input id="frames" type="number" min="1" max="12" value="3" />
+        </div>
+        <div style="width:160px">
+          <label>Mode</label>
+          <select id="mode"><option value="auto">Auto-play</option><option value="step">Step-by-step</option></select>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button id="startBtn" class="btn primary">Start Simulation</button>
+        <button id="resetBtn" class="btn">Reset</button>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+        <div class="small">Speed</div>
+        <input id="speed" type="range" min="200" max="1200" value="600" style="flex:1" />
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+        <button id="exportPng" class="btn">Export PNG</button>
+        <button id="exportPdf" class="btn">Export PDF</button>
+      </div>
+      <div id="error" class="small" style="color:var(--fault);margin-top:8px;display:none"></div>
+    </div>
+
+    <div class="card" style="display:flex;flex-direction:column;justify-content:space-between">
+      <div>
+        <div class="small">Playback</div>
+        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+          <button id="prevBtn" class="btn">◀ Prev</button>
+          <button id="nextBtn" class="btn">Next ▶</button>
+          <button id="playBtn" class="btn">Play ▶</button>
+          <button id="viewBtn" class="btn">View Full Table</button>
+        </div>
+      </div>
+      <div style="margin-top:8px">
+        <div class="small">Theme</div>
+        <select id="themeSelect" style="margin-top:6px;padding:8px;border:2px solid var(--fg);border-radius:6px;background:transparent">
+          <option value="default">Black & White (default)</option>
+          <option value="minimal">Minimal</option>
+          <option value="chalk">Chalkboard</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="small">Quick tips</div>
+      <ul style="padding-left:18px;margin:8px 0 0 0">
+        <li>Space = Play/Pause · ← = Prev · → = Next · T = Toggle Theme</li>
+        <li>Use Auto-play to animate all columns; Step-by-step for manual control.</li>
+        <li>Export PNG/PDF for documentation.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="result-area">
+    <div class="table-wrap card" id="tableWrap">
+      <table id="resultTable"></table>
+    </div>
+
+    <aside class="sidebar card">
+      <div><strong>Step Explanation</strong></div>
+      <div id="explain">No simulation yet. Run to see step explanation here.</div>
+
+      <div style="margin-top:8px"><strong>Run History</strong></div>
+      <div id="history">(empty)</div>
+
+      <div style="margin-top:8px"><strong>Achievements</strong></div>
+      <div id="achievements"></div>
+    </aside>
+  </div>
+
+  <div id="statsArea" style="margin-top:12px;display:none">
+    <div style="display:flex;gap:12px">
+      <div class="card stat">Steps<br><strong id="stepsCount">0</strong></div>
+      <div class="card stat">Hits<br><strong id="hitsCount">0</strong></div>
+      <div class="card stat">Faults<br><strong id="faultsCount">0</strong></div>
+      <div class="card stat">Hit Ratio<br><strong id="hitRatio">0%</strong></div>
+    </div>
+  </div>
+
+  <footer class="meta">Developed for CSP108 — LRU (Group 2,5)</footer>
+</div>
+
+<script>
+// --- State ---
+let pages = [];
+let framesCount = 3;
+let historyArr = []; // array of arrays
+let hitsArr = []; // 'H'/'F'
+let stepIndex = 0;
+let playing = false;
+let timer = null;
+let awarded = {};
+
+// DOM
+const pagesInput = document.getElementById('pages');
+const framesInput = document.getElementById('frames');
+const modeSelect = document.getElementById('mode');
+const speedInput = document.getElementById('speed');
+const startBtn = document.getElementById('startBtn');
+const resetBtn = document.getElementById('resetBtn');
+const prevBtn = document.getElementById('prevBtn');
+const nextBtn = document.getElementById('nextBtn');
+const playBtn = document.getElementById('playBtn');
+const viewBtn = document.getElementById('viewBtn');
+const exportPng = document.getElementById('exportPng');
+const exportPdf = document.getElementById('exportPdf');
+const resultTable = document.getElementById('resultTable');
+const tableWrap = document.getElementById('tableWrap');
+const explain = document.getElementById('explain');
+const historyDiv = document.getElementById('history');
+const achievementsDiv = document.getElementById('achievements');
+const themeSelect = document.getElementById('themeSelect');
+const errorDiv = document.getElementById('error');
+const statsArea = document.getElementById('statsArea');
+const stepsCount = document.getElementById('stepsCount');
+const hitsCount = document.getElementById('hitsCount');
+const faultsCount = document.getElementById('faultsCount');
+const hitRatio = document.getElementById('hitRatio');
+
+// --- Helpers ---
+function parsePages(input){
+  return input.split(/[\s,]+/).filter(Boolean).map(s=>s.trim());
+}
+function showError(msg){ errorDiv.style.display='block'; errorDiv.textContent=msg; setTimeout(()=> errorDiv.style.display='none',3500); }
+
+// --- Core LRU compute ---
+function computeLRU(){
+  const raw = pagesInput.value.trim();
+  if(!raw){ showError('Enter reference string'); return false; }
+  pages = parsePages(raw);
+  framesCount = Math.max(1, Math.min(12, parseInt(framesInput.value)||3));
+  historyArr = [];
+  hitsArr = [];
+
+  let mem = [];
+  pages.forEach((p, idx)=>{
+    const hit = mem.indexOf(p) !== -1;
+    if(!hit){
+      if(mem.length >= framesCount) mem.shift();
+      mem.push(p);
+    } else {
+      // move to most recent
+      mem = mem.filter(x=>x!==p);
+      mem.push(p);
+    }
+    historyArr.push([...mem]);
+    hitsArr.push(hit? 'H':'F');
+  });
+  return true;
+}
+
+function buildTable(){
+  resultTable.innerHTML = '';
+  // header
+  const thead = document.createElement('thead');
+  const trh = document.createElement('tr');
+  const th0 = document.createElement('th'); th0.textContent=''; trh.appendChild(th0);
+  pages.forEach(p=>{ const th = document.createElement('th'); th.className='ref-cell'; th.textContent=p; trh.appendChild(th); });
+  thead.appendChild(trh); resultTable.appendChild(thead);
+
+  // frames rows
+  const tbody = document.createElement('tbody');
+  for(let f=0; f<framesCount; f++){
+    const tr = document.createElement('tr');
+    const th = document.createElement('th'); th.textContent='Frame ' + (f+1); tr.appendChild(th);
+    historyArr.forEach((col,idx)=>{
+      const td = document.createElement('td'); td.dataset.col=idx; td.dataset.row=f;
+      td.textContent = col[f] !== undefined ? col[f] : '-'; if(col[f]===undefined) td.classList.add('cell-empty'); tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  }
+  // status row
+  const trStatus = document.createElement('tr'); const thSt = document.createElement('th'); thSt.textContent='Status'; trStatus.appendChild(thSt);
+  hitsArr.forEach((h,idx)=>{ const td = document.createElement('td'); td.textContent=h; td.className = h==='H'?'hit':'fault'; td.dataset.col=idx; trStatus.appendChild(td); });
+  tbody.appendChild(trStatus);
+  resultTable.appendChild(tbody);
+
+  // stats
+  statsArea.style.display='block';
+  stepsCount.textContent = pages.length;
+  const hitCount = hitsArr.filter(h=>h==='H').length; hitsCount.textContent=hitCount;
+  const faultCount = hitsArr.filter(h=>h==='F').length; faultsCount.textContent=faultCount;
+  hitRatio.textContent = pages.length? Math.round((hitCount/pages.length)*100)+'%':'0%';
+
+  // reset step
+  stepIndex=0; clearAwards(); clearHistoryUI(); explain.textContent='Ready — use Play or Next to step through.';
+}
+
+// --- UI helpers ---
+function highlightColumn(idx){
+  // clear old animations
+  resultTable.querySelectorAll('td').forEach(td=>{ td.classList.remove('hit'); td.classList.remove('fault'); td.style.outline='none'; td.classList.remove('temp'); });
+  if(idx<0) return;
+  // determine changes between idx-1 and idx
+  const prev = idx-1;
+  for(let r=0;r<framesCount;r++){
+    const td = resultTable.querySelector(`td[data-col="${idx}"][data-row="${r}"]`);
+    if(!td) continue;
+    const currVal = historyArr[idx][r] !== undefined ? historyArr[idx][r] : null;
+    const prevVal = (prev>=0 && historyArr[prev][r]!==undefined)? historyArr[prev][r] : null;
+    if(currVal !== prevVal){ td.classList.add('fault'); }
+    else if(currVal !== null){ const page = pages[idx]; if(hitsArr[idx]==='H' && currVal==page) td.classList.add('hit'); }
+    // simple focus
+    td.style.outline='3px solid rgba(0,0,0,0.06)';
+  }
+  // status cell blink
+  const statusTd = resultTable.querySelector(`tr:last-child td[data-col="${idx}"]`);
+  if(statusTd) { statusTd.classList.add('temp'); setTimeout(()=>statusTd.classList.remove('temp'),600); }
+
+  // explanation text
+  explainStep(idx);
+
+  // add to history log
+  pushHistoryLog(idx);
+
+  // scroll to column nicely
+  const th = resultTable.querySelector(`th:nth-child(${idx+2})`);
+  if(th){ const wrap = tableWrap; const rect = th.getBoundingClientRect(); const wrapRect = wrap.getBoundingClientRect(); wrap.scrollLeft += rect.left - wrapRect.left - 40; }
+}
+
+function explainStep(idx){
+  const page = pages[idx];
+  const status = hitsArr[idx];
+  let text = `Step ${idx+1}: Page ${page} — `;
+  if(status==='H') text += `HIT. Page already in one of the frames, update its recency.`;
+  else {
+    text += `FAULT. Page not in frames so LRU replacement is applied.`;
+    // find which frame replaced
+    const prev = idx-1;
+    if(prev<0){ text += ` Placed into first available frame.`; }
+    else {
+      // find difference
+      const prevArr = historyArr[prev] || [];
+      const currArr = historyArr[idx] || [];
+      let replacedIndex = -1;
+      for(let r=0;r<framesCount;r++){
+        if(prevArr[r] === undefined && currArr[r] !== undefined){ replacedIndex = r; break; }
+      }
+      if(replacedIndex===-1){ // find which value changed
+        for(let r=0;r<framesCount;r++){ if(prevArr[r] !== currArr[r]){ replacedIndex = r; break; } }
+      }
+      if(replacedIndex>=0) text += ` Replaced frame ${replacedIndex+1} with page ${currArr[replacedIndex]}.`;
+    }
+  }
+  explain.textContent = text;
+}
+
+function pushHistoryLog(idx){
+  const p = pages[idx]; const s = hitsArr[idx];
+  const div = document.createElement('div'); div.className='log'; div.textContent = `Step ${idx+1}: Page ${p} — ${s==='H'?'HIT':'FAULT'}`;
+  historyDiv.appendChild(div); historyDiv.scrollTop = historyDiv.scrollHeight;
+  // achievements
+  checkAchievements(idx);
+}
+
+// --- Achievements ---
+function clearAwards(){ awarded = {}; achievementsDiv.innerHTML=''; }
+function award(name,label){ if(awarded[name]) return; awarded[name]=true; const d=document.createElement('div'); d.className='badge'; d.textContent=label; achievementsDiv.appendChild(d); }
+
+function checkAchievements(idx){
+  // award first hit/fault
+  const s = hitsArr[idx];
+  if(idx===0 && s==='H') award('firstHit','First Hit');
+  if(idx===0 && s==='F') award('firstFault','First Fault');
+  // fault streak
+  let streak=0; for(let i=idx;i>=0 && hitsArr[i]==='F';i--) streak++;
+  if(streak>=5) award('faultStorm','Fault Storm!');
+  // hit ratio after final step
+  if(idx===pages.length-1){ const hits = hitsArr.filter(x=>x==='H').length; const ratio = hits/pages.length; if(ratio>0.7) award('smooth','Smooth Run'); if(hits===pages.length) award('perfect','Perfect! All hits'); }
+}
+
+// --- Playback ---
+function playAuto(){
+  const delay = parseInt(speedInput.value);
+  if(stepIndex >= pages.length){ playing=false; playBtn.textContent='Play ▶'; return; }
+  highlightColumn(stepIndex);
+  stepIndex++;
+  timer = setTimeout(()=>{ if(playing) playAuto(); }, delay);
+}
+
+// --- Controls binding ---
+startBtn.addEventListener('click', ()=>{
+  // compute
+  resetRunState();
+  const ok = computeLRU(); if(!ok) return;
+  buildTable();
+  if(modeSelect.value==='auto'){ playing=true; playBtn.textContent='Pause ❚❚'; playAuto(); } else { playBtn.textContent='Play ▶'; }
+});
+
+resetBtn.addEventListener('click', ()=>{ resetAll(); });
+nextBtn.addEventListener('click', ()=>{ if(!historyArr.length) return; if(stepIndex>=pages.length) stepIndex=pages.length-1; highlightColumn(stepIndex); stepIndex = Math.min(pages.length, stepIndex+1); });
+prevBtn.addEventListener('click', ()=>{ if(!historyArr.length) return; stepIndex = Math.max(0, stepIndex-1); highlightColumn(stepIndex); });
+playBtn.addEventListener('click', ()=>{ if(!historyArr.length) return; if(playing){ playing=false; playBtn.textContent='Play ▶'; clearTimeout(timer); } else { playing=true; playBtn.textContent='Pause ❚❚'; playAuto(); } });
+viewBtn.addEventListener('click', ()=>{ tableWrap.style.maxHeight = tableWrap.style.maxHeight ? '' : '650px'; tableWrap.style.overflow='auto'; window.scrollTo({top:tableWrap.offsetTop-16,behavior:'smooth'}); });
+
+// Export
+exportPng.addEventListener('click', async ()=>{
+  if(!resultTable.innerHTML) return showError('No results to export');
+  const canvas = await html2canvas(tableWrap, {scale:2, backgroundColor:'#ffffff'});
+  canvas.toBlob(blob=>{ const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='lru_result.png'; a.click(); URL.revokeObjectURL(url); });
+});
+exportPdf.addEventListener('click', async ()=>{
+  if(!resultTable.innerHTML) return showError('No results to export');
+  const canvas = await html2canvas(tableWrap, {scale:2, backgroundColor:'#ffffff'});
+  const img = canvas.toDataURL('image/png'); const { jsPDF } = window.jspdf; const pdf = new jsPDF('l','pt','a4'); const pageW = pdf.internal.pageSize.getWidth(); const imgW = pageW-40; const imgH = (canvas.height*imgW)/canvas.width; pdf.addImage(img,'PNG',20,20,imgW,imgH); pdf.save('lru_result.pdf');
+});
+
+// Theme
+themeSelect.addEventListener('change',(e)=>{ const v=e.target.value; const root=document.getElementById('appRoot'); root.className = v==='default' ? '' : (v==='minimal'? 'theme-minimal' : 'theme-chalk'); });
+
+// Keyboard
+window.addEventListener('keydown',(e)=>{
+  if(e.code==='Space'){ e.preventDefault(); playBtn.click(); }
+  if(e.key==='ArrowRight') nextBtn.click();
+  if(e.key==='ArrowLeft') prevBtn.click();
+  if(e.key.toLowerCase()==='t'){ // toggle theme
+    const sel = themeSelect; const next = sel.selectedIndex+1; if(next >= sel.options.length) sel.selectedIndex = 0; else sel.selectedIndex = next; sel.dispatchEvent(new Event('change'));
+  }
+});
+
+// reset helpers
+function resetRunState(){ clearTimeout(timer); playing=false; timer=null; awarded={}; achievementsDiv.innerHTML=''; historyDiv.innerHTML=''; explain.textContent=''; statsArea.style.display='none'; }
+function resetAll(){ resetRunState(); pagesInput.value=''; framesInput.value=3; resultTable.innerHTML=''; historyDiv.innerHTML=''; achievementsDiv.innerHTML=''; explain.textContent='No simulation yet.'; }
+
+// compute + build wrappers already defined above
+// expose small helper to allow prev to rebuild state
+function rebuildToStep(target){
+  // rebuild play up to target
+  resetRunState(); computeLRU(); buildTable(); for(let i=0;i<target;i++){ highlightColumn(i); }
+  stepIndex = target;
+}
+
+// small helper to show error
+function showError(msg){ errorDiv.style.display='block'; errorDiv.textContent=msg; setTimeout(()=> errorDiv.style.display='none',3500); }
+
+// allow direct next when not playing
+function nextStep(){ nextBtn.click(); }
+function prevStep(){ prevBtn.click(); }
+
+// END
+</script>
+</body>
+</html>
